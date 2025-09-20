@@ -137,7 +137,16 @@ body {
 [contenteditable="true"] { outline: 2px solid transparent; transition: outline 0.2s; padding: 2px; margin: -2px; border-radius: 4px; }
 [contenteditable="true"]:focus { background-color: var(--editable-bg); outline: 2px solid var(--primary-color); }
 .tags-cell { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
-.tag { background-color: var(--secondary-color); color: white; padding: 3px 8px; border-radius: 12px; font-size: 0.8rem; white-space: nowrap; }
+.tag {
+    background-color: var(--secondary-color);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
 
 /* New styles for currency and date tags within table cells */
 .currency-tag, .date-tag {
@@ -151,9 +160,11 @@ body {
     display: inline-block;
     white-space: nowrap;
 }
+.tag:hover,
 .currency-tag:hover, .date-tag:hover {
     background-color: var(--primary-hover);
 }
+.tag.active,
 .currency-tag.active, .date-tag.active {
     background-color: var(--primary-color);
 }

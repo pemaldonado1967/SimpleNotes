@@ -42,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let noteIdCounter = 1;
     let selectedNoteIds = new Set();
     let sortConfig = { key: 'created', direction: 'desc' };
-    let activeTagFilter = null;
+    let activeTagFilters = new Set();
     let searchTerm = '';
     let showDeleted = false;
     let activeCurrencyFilter = null; // New state for currency filter
@@ -224,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 1. Filter
         const filteredNotes = notes.filter(note => {
             if (!showDeleted && note.deleted) return false;
-            const matchesTag = activeTagFilter ? note.tags.includes(activeTagFilter) : true;
+            const matchesTag = activeTagFilters.size === 0 ? true : [...activeTagFilters].every(filterTag => note.tags.includes(filterTag));
             const matchesSearch = searchTerm ? note.content.toLowerCase().includes(searchTerm.toLowerCase()) || String(note.id).includes(searchTerm) : true;
             const matchesCurrency = activeCurrencyFilter ? note.currencyCode === activeCurrencyFilter : true;
             const matchesDate = activeDateFilter ? note.dueDateFormatted === activeDateFilter : true;
@@ -322,11 +322,14 @@ document.addEventListener('DOMContentLoaded', () => {
         tags.forEach(tagText => {
             const tagEl = document.createElement('span');
             tagEl.className = 'tag';
+            if (activeTagFilters.has(tagText)) tagEl.classList.add('active');
             tagEl.textContent = tagText;
+            tagEl.onclick = () => handleTagFilterClick(tagText);
             const deleteBtn = document.createElement('span');
             deleteBtn.className = 'delete-tag';
             deleteBtn.textContent = 'x';
-            deleteBtn.onclick = () => {
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation(); // Prevent the tag filter click from firing
                 const note = findNoteById(noteId);
                 note.tags = note.tags.filter(t => t !== tagText);
                 saveState();
@@ -371,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const button = document.createElement('button');
             button.className = 'tag-filter';
             button.textContent = `${tag} (${count})`;
-            if (tag === activeTagFilter) button.classList.add('active');
+            if (activeTagFilters.has(tag)) button.classList.add('active');
             button.onclick = () => handleTagFilterClick(tag);
             appFooter.appendChild(button);
         });
@@ -629,7 +632,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleTagFilterClick(tag) {
-        activeTagFilter = (activeTagFilter === tag) ? null : tag;
+        if (activeTagFilters.has(tag)) {
+            activeTagFilters.delete(tag);
+        } else {
+            activeTagFilters.add(tag);
+        }
         renderApp();
     }
 
