@@ -32,7 +32,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmationMessage = document.getElementById('confirmation-message');
     const confirmYesBtn = document.getElementById('confirm-yes-btn');
     const confirmNoBtn = document.getElementById('confirm-no-btn');
-
+    // New Totals Display Elements
+    const totalQtySpan = document.getElementById('total-qty');
+    const totalAmountSpan = document.getElementById('total-amount');
+    const totalSubtotalSpan = document.getElementById('total-subtotal');
 
     // --- STATE MANAGEMENT ---
     let notes = [];
@@ -42,14 +45,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeTagFilter = null;
     let searchTerm = '';
     let showDeleted = false;
+    let activeCurrencyFilter = null; // New state for currency filter
+    let activeDateFilter = null;     // New state for date filter
     let confirmCallback = null;
     let columnConfig = {
-        order: ['selection', 'id', 'content', 'tags', 'created'],
-        visible: { selection: true, id: true, content: true, tags: true, created: true },
+        order: ['selection', 'id', 'content', 'qty', 'amount', 'subtotal', 'due', 'tags', 'created'],
+        visible: { selection: true, id: true, content: true, qty: true, amount: true, subtotal: true, due: true, tags: true, created: true },
         widths: {}
     };
     const columnLabels = {
-        selection: '', id: 'ID', content: 'Note Content', tags: 'Tags', created: 'Date Created'
+        selection: '', id: 'ID', content: 'Note Content', 
+        qty: 'Qty', amount: 'Amount', subtotal: 'SubTotal', due: 'Due',
+        tags: 'Tags', created: 'Date Created'
     };
     const speechLanguages = [
         { name: 'English (US)', code: 'en-US' }, { name: 'Español (MX)', code: 'es-MX' },
@@ -92,7 +99,29 @@ document.addEventListener('DOMContentLoaded', () => {
         userLogo.src = localStorage.getItem('notes-app-logo') || userLogo.src;
         userName.value = localStorage.getItem('notes-app-name') || userName.value;
         const storedColumns = localStorage.getItem('notes-app-columns');
-        if (storedColumns) columnConfig = JSON.parse(storedColumns);
+        if (storedColumns) {
+            const loadedConfig = JSON.parse(storedColumns);
+            
+            // Preserve existing order, add new columns at the end
+            const defaultOrder = ['selection', 'id', 'content', 'qty', 'amount', 'subtotal', 'due', 'tags', 'created'];
+            const mergedOrder = [];
+            
+            // Add columns from loaded config first, maintaining their order
+            loadedConfig.order.forEach(key => {
+                if (defaultOrder.includes(key) && !mergedOrder.includes(key)) {
+                    mergedOrder.push(key);
+                }
+            });
+            // Add any new default columns that weren't in the loaded config
+            defaultOrder.forEach(key => {
+                if (!mergedOrder.includes(key)) {
+                    mergedOrder.push(key);
+                }
+            });
+            columnConfig.order = mergedOrder;
+            columnConfig.visible = { ...columnConfig.visible, ...loadedConfig.visible }; // Merge visibility, new ones default to true
+            columnConfig.widths = { ...columnConfig.widths, ...loadedConfig.widths }; // Merge widths
+        }
     }
 
     function saveState() {
@@ -104,12 +133,61 @@ document.addEventListener('DOMContentLoaded', () => {
         return notes.find(note => note.id === id);
     }
 
+    function parseNoteContent(content) {
+        const parsed = { qty: null, amount: null, currencyCode: null, dueDateISO: null, dueDateFormatted: null };
+
+        // 1. Parse Quantity: e.g., "Q5"
+        const qtyMatch = content.match(/\bQ(\d+)\b/i);
+        if (qtyMatch) {
+            parsed.qty = parseInt(qtyMatch[1], 10);
+        }
+
+        // 2. Parse Amount: e.g., "USD400"
+        const amountMatch = content.match(/\b([A-Z]{3})(\d+(\.\d{1,2})?)\b/i);
+        if (amountMatch) {
+            parsed.currencyCode = amountMatch[1].toUpperCase();
+            parsed.amount = parseFloat(amountMatch[2]);
+            // If an amount is found and quantity wasn't explicitly set, default it to 1.
+            if (parsed.qty === null) {
+                parsed.qty = 1;
+            }
+        }
+
+        // 3. Parse Due Date: e.g., "Due3009" or "Due300926"
+        const dateMatch = content.match(/\bDue(\d{4}|\d{6})\b/i);
+        if (dateMatch) {
+            const dateStr = dateMatch[1];
+            let day, month, year; // Declare variables
+            const currentYear = new Date().getFullYear();
+            if (dateStr.length === 4) { // DDMM
+                day = parseInt(dateStr.substring(0, 2), 10);
+                month = parseInt(dateStr.substring(2, 4), 10);
+                year = currentYear;
+            } else { // DDMMYY
+                day = parseInt(dateStr.substring(0, 2), 10);
+                month = parseInt(dateStr.substring(2, 4), 10);
+                year = parseInt('20' + dateStr.substring(4, 6), 10);
+            }
+            // Basic validation for day, month, year ranges
+            if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2100) {
+                // JS months are 0-indexed, so subtract 1
+                const parsedDate = new Date(year, month - 1, day);
+                if (parsedDate.getFullYear() === year && parsedDate.getMonth() === (month - 1) && parsedDate.getDate() === day) {
+                     parsed.dueDateISO = parsedDate.toISOString();
+                     parsed.dueDateFormatted = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+                }
+            }
+        }
+        return parsed;
+    }
+
     // --- RENDER FUNCTIONS ---
     function renderApp() {
         renderHeader();
         renderTable();
         renderFooter();
         renderColumnModal();
+        calculateAndRenderTotals(); // New: Calculate and render totals
     }
 
     function renderHeader() {
@@ -128,6 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 th.textContent = columnLabels[key];
                 th.classList.add('sortable');
+                th.draggable = true;
                 const indicator = document.createElement('span');
                 indicator.className = 'sort-indicator';
                 if (sortConfig.key === key) {
@@ -143,11 +222,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getNotesToDisplay() {
         // 1. Filter
-        let filteredNotes = notes.filter(note => {
+        const filteredNotes = notes.filter(note => {
             if (!showDeleted && note.deleted) return false;
             const matchesTag = activeTagFilter ? note.tags.includes(activeTagFilter) : true;
             const matchesSearch = searchTerm ? note.content.toLowerCase().includes(searchTerm.toLowerCase()) || String(note.id).includes(searchTerm) : true;
-            return matchesTag && matchesSearch;
+            const matchesCurrency = activeCurrencyFilter ? note.currencyCode === activeCurrencyFilter : true;
+            const matchesDate = activeDateFilter ? note.dueDateFormatted === activeDateFilter : true;
+            return matchesTag && matchesSearch && matchesCurrency && matchesDate;
         });
 
         // 2. Sort
@@ -193,6 +274,40 @@ document.addEventListener('DOMContentLoaded', () => {
                         break;
                     case 'created':
                         td.textContent = new Date(note.created).toLocaleString();
+                        break;
+                    case 'qty':
+                        td.textContent = note.qty || '';
+                        td.classList.add('numeric-cell');
+                        break;
+                    case 'amount':
+                        if (note.amount !== null && note.currencyCode) {
+                            const currencySpan = document.createElement('span');
+                            currencySpan.textContent = note.currencyCode;
+                            currencySpan.classList.add('currency-tag');
+                            currencySpan.dataset.currency = note.currencyCode;
+                            if (activeCurrencyFilter === note.currencyCode) currencySpan.classList.add('active');
+                            td.appendChild(currencySpan);
+                            td.append(` ${note.amount.toFixed(2)}`);
+                        }
+                        td.classList.add('numeric-cell');
+                        break;
+                    case 'subtotal':
+                        if (note.amount !== null && note.currencyCode) { // Use currencyCode for consistency
+                            const qty = note.qty || 1;
+                            const subtotal = qty * note.amount;
+                            td.textContent = `${note.currencyCode} ${subtotal.toFixed(2)}`;
+                        }
+                        td.classList.add('numeric-cell');
+                        break;
+                    case 'due':
+                        if (note.dueDateFormatted) {
+                            const dateSpan = document.createElement('span');
+                            dateSpan.textContent = note.dueDateFormatted;
+                            dateSpan.classList.add('date-tag');
+                            dateSpan.dataset.date = note.dueDateFormatted;
+                            if (activeDateFilter === note.dueDateFormatted) dateSpan.classList.add('active');
+                            td.appendChild(dateSpan);
+                        }
                         break;
                 }
                 row.appendChild(td);
@@ -287,6 +402,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // New: Calculate and render totals in the header
+    function calculateAndRenderTotals() {
+        let totalQty = 0;
+        let totalAmount = 0;
+        let totalSubtotal = 0;
+
+        // The notes for totals should respect the same filters as the main table view for consistency.
+        const notesForCalculation = getNotesToDisplay();
+
+        notesForCalculation.forEach(note => {
+            // Check for number type to avoid adding null/undefined which results in NaN
+            if (typeof note.qty === 'number') totalQty += note.qty;
+            if (typeof note.amount === 'number') totalAmount += note.amount;
+            if (typeof note.amount === 'number') { // Subtotal calculation
+                const qty = (typeof note.qty === 'number') ? note.qty : 1;
+                totalSubtotal += (qty * note.amount);
+            }
+        });
+
+        totalQtySpan.textContent = `Qty: ${totalQty}`;
+        totalAmountSpan.textContent = `Amt: ${totalAmount.toFixed(2)}`;
+        totalSubtotalSpan.textContent = `Sub: ${totalSubtotal.toFixed(2)}`;
+    }
+
     function populateLanguages() {
         if (!recognition) return;
         speechLanguages.forEach(lang => {
@@ -354,6 +493,60 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         advancedToolsModal.addEventListener('click', e => e.stopPropagation());
 
+        // --- DRAG & DROP FOR COLUMNS ---
+        let draggedTh = null;
+
+        tableHeader.addEventListener('dragstart', e => {
+            const target = e.target.closest('th');
+            if (target && target.draggable) {
+                draggedTh = target;
+                // Use a timeout to allow the browser to create the drag image before applying styles
+                setTimeout(() => {
+                    if (draggedTh) draggedTh.classList.add('dragging');
+                }, 0);
+            }
+        });
+
+        tableHeader.addEventListener('dragend', () => {
+            if (draggedTh) draggedTh.classList.remove('dragging');
+            tableHeader.querySelectorAll('th').forEach(th => th.classList.remove('drag-over'));
+            draggedTh = null;
+        });
+
+        tableHeader.addEventListener('dragover', e => {
+            const targetTh = e.target.closest('th');
+            if (!draggedTh || !targetTh || targetTh === draggedTh || !targetTh.draggable) {
+                return;
+            }
+            e.preventDefault(); // Necessary to allow dropping
+
+            tableHeader.querySelectorAll('th').forEach(th => th.classList.remove('drag-over'));
+            targetTh.classList.add('drag-over');
+        });
+
+        tableHeader.addEventListener('drop', e => {
+            e.preventDefault();
+            const dropTargetTh = e.target.closest('th');
+            if (dropTargetTh && draggedTh && dropTargetTh !== draggedTh && dropTargetTh.draggable) {
+                const order = columnConfig.order;
+                const draggedKey = draggedTh.dataset.key;
+                const targetKey = dropTargetTh.dataset.key;
+
+                const draggedIndex = order.indexOf(draggedKey);
+                const targetIndex = order.indexOf(targetKey);
+
+                if (draggedIndex > -1 && targetIndex > -1) {
+                    const [removed] = order.splice(draggedIndex, 1);
+                    order.splice(targetIndex, 0, removed);
+                    saveState();
+                    renderApp();
+                }
+            }
+            if (draggedTh) draggedTh.classList.remove('dragging');
+            tableHeader.querySelectorAll('th').forEach(th => th.classList.remove('drag-over'));
+            draggedTh = null;
+        });
+
         tableHeader.addEventListener('mouseup', () => {
             tableHeader.querySelectorAll('th').forEach(th => {
                 const key = th.dataset.key;
@@ -398,12 +591,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function createNote() {
         const content = noteInput.value.trim();
         if (!content) return;
+
+        const parsedData = parseNoteContent(content);
+
         const newNote = {
             id: noteIdCounter++,
             content: content,
             tags: autoTag(content),
             created: new Date().toISOString(),
-            deleted: false
+            deleted: false,
+            ...parsedData
         };
         notes.push(newNote);
         noteInput.value = '';
@@ -448,6 +645,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const noteId = parseInt(row.dataset.id);
         if (isNaN(noteId)) return;
 
+        const isCurrencyTag = e.target.classList.contains('currency-tag');
+        const isDateTag = e.target.classList.contains('date-tag');
+
+        if (isCurrencyTag) {
+            e.stopPropagation(); // Prevent row selection
+            const clickedCurrency = e.target.dataset.currency;
+            activeCurrencyFilter = (activeCurrencyFilter === clickedCurrency) ? null : clickedCurrency;
+            renderApp();
+            return;
+        }
+
+        if (isDateTag) {
+            e.stopPropagation(); // Prevent row selection
+            const clickedDate = e.target.dataset.date;
+            activeDateFilter = (activeDateFilter === clickedDate) ? null : clickedDate;
+            renderApp();
+            return;
+        }
+
+
         const isCheckbox = e.target.type === 'checkbox';
         if (isCheckbox) {
             e.target.checked ? selectedNoteIds.add(noteId) : selectedNoteIds.delete(noteId);
@@ -480,27 +697,30 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = cell.dataset.key;
         const newValue = cell.textContent.trim();
 
-        if (key === 'id') {
+        if (key === 'id' && note.id != newValue) {
             const newId = parseInt(newValue);
             if (isNaN(newId) || (newId !== originalId && findNoteById(newId))) {
                 alert('Invalid ID. It must be a unique number.');
                 cell.textContent = originalId; // Revert
                 return;
             }
-            if(newId !== originalId) {
-                if(selectedNoteIds.has(originalId)) {
-                    selectedNoteIds.delete(originalId);
-                    selectedNoteIds.add(newId);
-                }
-                note.id = newId;
-                row.dataset.id = newId;
+            if (selectedNoteIds.has(originalId)) {
+                selectedNoteIds.delete(originalId);
+                selectedNoteIds.add(newId);
             }
-        } else if (note[key] !== newValue) {
+            note.id = newId;
+            saveState();
+            renderApp();
+        } else if (key === 'content' && note.content !== newValue) {
+            note.content = newValue;
+            Object.assign(note, parseNoteContent(newValue));
+            saveState(); // Save the updated note with new parsed data
+            renderApp(); // Re-render to update table and totals
+        } else if (note[key] !== newValue) { // Fallback for other potential editable fields
             note[key] = newValue;
+            saveState();
+            renderFooter();
         }
-
-        saveState();
-        renderFooter(); // Tags might have changed
     }
     
     function handleSelectAll(e) {
@@ -623,16 +843,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const choice = prompt('Import notes? Type "MERGE" to add to existing, or "REPLACE" to overwrite.').toUpperCase();
                 if (choice === 'REPLACE') {
-                    notes = importedNotes;
+                    notes = importedNotes.map(n => {
+                        const parsedData = parseNoteContent(n.content || '');
+                        return { ...n, ...parsedData };
+                    });
                 } else if (choice === 'MERGE') {
                     const existingIds = new Set(notes.map(n => n.id));
                     let maxId = noteIdCounter;
                     importedNotes.forEach(impNote => {
+                        const parsedData = parseNoteContent(impNote.content || '');
+                        const finalNote = { ...impNote, ...parsedData };
                         while (existingIds.has(impNote.id)) {
-                            impNote.id = maxId++;
+                            finalNote.id = maxId++;
                         }
-                        notes.push(impNote);
-                        existingIds.add(impNote.id);
+                        notes.push(finalNote);
+                        existingIds.add(finalNote.id);
                     });
                 } else {
                     alert("Import cancelled.");

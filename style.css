@@ -74,6 +74,7 @@ body {
     align-items: center;
     background-color: var(--bg-color);
     border-radius: 20px;
+    max-width: 800px; /* Reduced width */
     padding: 5px 15px;
     border: 1px solid var(--border-color);
 }
@@ -107,6 +108,16 @@ body {
 #table-header th.sortable:hover { background-color: var(--row-hover-bg); }
 #table-header th .sort-indicator { display: inline-block; vertical-align: middle; margin-left: 5px; opacity: 0.5; }
 
+/* Drag & Drop Column Styles */
+#table-header th.dragging {
+    opacity: 0.5;
+    background: var(--selected-row-bg);
+    cursor: grabbing;
+}
+#table-header th.drag-over {
+    border-left: 3px solid var(--primary-color);
+}
+
 #notes-tbody tr { border-bottom: 1px solid var(--border-color); transition: background-color 0.2s; }
 #notes-tbody tr:hover { background-color: var(--row-hover-bg); }
 #notes-tbody tr.selected { background-color: var(--selected-row-bg) !important; }
@@ -120,12 +131,37 @@ body {
     background-color: var(--deleted-row-bg);
 }
 #notes-tbody td { padding: 12px 10px; vertical-align: top; word-wrap: break-word; height: auto; }
+.numeric-cell { text-align: right; }
 
 /* Editable & Tags */
 [contenteditable="true"] { outline: 2px solid transparent; transition: outline 0.2s; padding: 2px; margin: -2px; border-radius: 4px; }
 [contenteditable="true"]:focus { background-color: var(--editable-bg); outline: 2px solid var(--primary-color); }
 .tags-cell { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .tag { background-color: var(--secondary-color); color: white; padding: 3px 8px; border-radius: 12px; font-size: 0.8rem; white-space: nowrap; }
+
+/* New styles for currency and date tags within table cells */
+.currency-tag, .date-tag {
+    cursor: pointer;
+    background-color: var(--secondary-color);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    margin-right: 5px;
+    display: inline-block;
+    white-space: nowrap;
+}
+.currency-tag:hover, .date-tag:hover {
+    background-color: var(--primary-hover);
+}
+.currency-tag.active, .date-tag.active {
+    background-color: var(--primary-color);
+}
+
+/* Totals Display in Header */
+.totals-display { display: flex; align-items: center; gap: 15px; padding: 0 15px; flex-shrink: 0; }
+.totals-display .totals-label { font-weight: bold; color: var(--primary-color); }
+.totals-display .total-item { font-size: 0.95rem; color: var(--text-color); }
 .tag .delete-tag { margin-left: 4px; cursor: pointer; font-weight: bold; opacity: 0.7; }
 .tag .delete-tag:hover { opacity: 1; }
 .add-tag-btn { cursor: pointer; font-size: 1.2rem; color: var(--secondary-color); }
