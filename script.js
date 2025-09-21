@@ -142,15 +142,38 @@ document.addEventListener('DOMContentLoaded', () => {
             parsed.qty = parseInt(qtyMatch[1], 10);
         }
 
-        // 2. Parse Amount: e.g., "USD400"
-        const amountMatch = content.match(/\b(?!Due\b)([A-Z]{3})(\d+(\.\d{1,2})?)\b/i);
-        if (amountMatch) {
-            parsed.currencyCode = amountMatch[1].toUpperCase();
-            parsed.amount = parseFloat(amountMatch[2]);
-            // If an amount is found and quantity wasn't explicitly set, default it to 1.
-            if (parsed.qty === null) {
-                parsed.qty = 1;
+        // 2. Parse Amount. Try calculation (with optional currency) first, then static currency-based amount.
+        const calcMatch = content.match(/\b(?:([A-Z]{3})\s*)?=\s*([\d\.\+\-\*\/\(\)\s]+)/i);
+
+        if (calcMatch) {
+            const currency = calcMatch[1]; // Might be undefined
+            const expression = calcMatch[2].trim();
+            
+            // Basic validation to prevent malicious code injection
+            if (/^[\d\.\+\-\*\/\(\)\s]+$/.test(expression)) {
+                try {
+                    // Use Function constructor for safer evaluation than eval()
+                    const calculatedAmount = new Function('return ' + expression)();
+                    if (typeof calculatedAmount === 'number' && isFinite(calculatedAmount)) {
+                        parsed.amount = calculatedAmount;
+                        if (currency) {
+                            parsed.currencyCode = currency.toUpperCase();
+                        }
+                    }
+                } catch (e) {
+                    console.error("Calculation error:", e);
+                }
             }
+        } else {
+            const amountMatch = content.match(/\b(?!Due\b)([A-Z]{3})(\d+(\.\d{1,2})?)\b/i);
+            if (amountMatch) {
+                parsed.currencyCode = amountMatch[1].toUpperCase();
+                parsed.amount = parseFloat(amountMatch[2]);
+            }
+        }
+
+        if (typeof parsed.amount === 'number' && parsed.qty === null) {
+            parsed.qty = 1;
         }
 
         // 3. Parse Natural Date: e.g., "24/12" or "02/05/26"
@@ -230,8 +253,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 1. Filter
         const filteredNotes = notes.filter(note => {
             if (!showDeleted && note.deleted) return false;
-            const matchesTag = activeTagFilters.size === 0 ? true : [...activeTagFilters].every(filterTag => note.tags.includes(filterTag));
-            const matchesSearch = searchTerm ? note.content.toLowerCase().includes(searchTerm.toLowerCase()) || String(note.id).includes(searchTerm) : true;
+            const noteTags = note.tags || []; // Defensively handle notes without a tags property
+            const matchesTag = activeTagFilters.size === 0 ? true : [...activeTagFilters].every(filterTag => noteTags.includes(filterTag));
+            const matchesSearch = searchTerm ? (note.content || '').toLowerCase().includes(searchTerm.toLowerCase()) || String(note.id).includes(searchTerm) : true;
             const matchesCurrency = activeCurrencyFilter ? note.currencyCode === activeCurrencyFilter : true;
             const matchesDate = activeDateFilter ? note.dueDateFormatted === activeDateFilter : true;
             return matchesTag && matchesSearch && matchesCurrency && matchesDate;
@@ -286,22 +310,30 @@ document.addEventListener('DOMContentLoaded', () => {
                         td.classList.add('numeric-cell');
                         break;
                     case 'amount':
-                        if (note.amount !== null && note.currencyCode) {
-                            const currencySpan = document.createElement('span');
-                            currencySpan.textContent = note.currencyCode;
-                            currencySpan.classList.add('currency-tag');
-                            currencySpan.dataset.currency = note.currencyCode;
-                            if (activeCurrencyFilter === note.currencyCode) currencySpan.classList.add('active');
-                            td.appendChild(currencySpan);
-                            td.append(` ${note.amount.toFixed(2)}`);
+                        if (typeof note.amount === 'number') {
+                            if (note.currencyCode) {
+                                const currencySpan = document.createElement('span');
+                                currencySpan.textContent = note.currencyCode;
+                                currencySpan.classList.add('currency-tag');
+                                currencySpan.dataset.currency = note.currencyCode;
+                                if (activeCurrencyFilter === note.currencyCode) currencySpan.classList.add('active');
+                                td.appendChild(currencySpan);
+                                td.append(` ${note.amount.toFixed(2)}`);
+                            } else {
+                                td.textContent = note.amount.toFixed(2);
+                            }
                         }
                         td.classList.add('numeric-cell');
                         break;
                     case 'subtotal':
-                        if (note.amount !== null && note.currencyCode) { // Use currencyCode for consistency
-                            const qty = note.qty || 1;
+                        if (typeof note.amount === 'number') {
+                            const qty = (typeof note.qty === 'number') ? note.qty : 1;
                             const subtotal = qty * note.amount;
-                            td.textContent = `${note.currencyCode} ${subtotal.toFixed(2)}`;
+                            if (note.currencyCode) {
+                                td.textContent = `${note.currencyCode} ${subtotal.toFixed(2)}`;
+                            } else {
+                                td.textContent = subtotal.toFixed(2);
+                            }
                         }
                         td.classList.add('numeric-cell');
                         break;
@@ -325,7 +357,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTagsCell(td, tags, noteId) {
         td.innerHTML = ''; 
         td.classList.add('tags-cell');
-        tags.forEach(tagText => {
+        (tags || []).forEach(tagText => {
             const tagEl = document.createElement('span');
             tagEl.className = 'tag';
             if (activeTagFilters.has(tagText)) tagEl.classList.add('active');
@@ -370,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const tagCounts = notes.reduce((acc, note) => {
             if (!note.deleted) {
-                note.tags.forEach(tag => { acc[tag] = (acc[tag] || 0) + 1; });
+                (note.tags || []).forEach(tag => { acc[tag] = (acc[tag] || 0) + 1; });
             }
             return acc;
         }, {});
