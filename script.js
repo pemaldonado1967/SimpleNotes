@@ -143,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 2. Parse Amount: e.g., "USD400"
-        const amountMatch = content.match(/\b([A-Z]{3})(\d+(\.\d{1,2})?)\b/i);
+        const amountMatch = content.match(/\b(?!Due\b)([A-Z]{3})(\d+(\.\d{1,2})?)\b/i);
         if (amountMatch) {
             parsed.currencyCode = amountMatch[1].toUpperCase();
             parsed.amount = parseFloat(amountMatch[2]);
@@ -153,26 +153,32 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // 3. Parse Due Date: e.g., "Due3009" or "Due300926"
-        const dateMatch = content.match(/\bDue(\d{4}|\d{6})\b/i);
+        // 3. Parse Natural Date: e.g., "24/12" or "02/05/26"
+        const dateMatch = content.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?\b/);
         if (dateMatch) {
-            const dateStr = dateMatch[1];
-            let day, month, year; // Declare variables
-            const currentYear = new Date().getFullYear();
-            if (dateStr.length === 4) { // DDMM
-                day = parseInt(dateStr.substring(0, 2), 10);
-                month = parseInt(dateStr.substring(2, 4), 10);
-                year = currentYear;
-            } else { // DDMMYY
-                day = parseInt(dateStr.substring(0, 2), 10);
-                month = parseInt(dateStr.substring(2, 4), 10);
-                year = parseInt('20' + dateStr.substring(4, 6), 10);
+            const day = parseInt(dateMatch[1], 10);
+            const month = parseInt(dateMatch[2], 10);
+            let year;
+
+            if (dateMatch[3]) { // Year is provided
+                if (dateMatch[3].length === 2) {
+                    year = parseInt('20' + dateMatch[3], 10);
+                } else {
+                    year = parseInt(dateMatch[3], 10);
+                }
+            } else { // No year provided
+                const now = new Date();
+                year = now.getFullYear();
+                const prospectiveDate = new Date(year, month - 1, day);
+                // If date without year is in the past, assume it's for the next year
+                if (prospectiveDate < now && (prospectiveDate.toDateString() !== now.toDateString())) {
+                    year++;
+                }
             }
-            // Basic validation for day, month, year ranges
+
             if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2100) {
-                // JS months are 0-indexed, so subtract 1
                 const parsedDate = new Date(year, month - 1, day);
-                if (parsedDate.getFullYear() === year && parsedDate.getMonth() === (month - 1) && parsedDate.getDate() === day) {
+                if (parsedDate.getFullYear() === year && parsedDate.getMonth() === (month - 1) && parsedDate.getDate() === day) { // Validate date (e.g. not 31/02)
                      parsed.dueDateISO = parsedDate.toISOString();
                      parsed.dueDateFormatted = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
                 }
