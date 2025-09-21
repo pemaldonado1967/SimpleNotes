@@ -36,6 +36,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalQtySpan = document.getElementById('total-qty');
     const totalAmountSpan = document.getElementById('total-amount');
     const totalSubtotalSpan = document.getElementById('total-subtotal');
+    // Tag Autocomplete Modal Elements
+    const tagInputModal = document.getElementById('tag-input-modal');
+    const tagInputField = document.getElementById('tag-input-field');
+    const tagSuggestionsList = document.getElementById('tag-suggestions-list');
 
     // --- STATE MANAGEMENT ---
     let notes = [];
@@ -48,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeCurrencyFilter = null; // New state for currency filter
     let activeDateFilter = null;     // New state for date filter
     let confirmCallback = null;
+    let currentNoteIdForTagging = null;
     let columnConfig = {
         order: ['selection', 'id', 'content', 'qty', 'amount', 'subtotal', 'due', 'tags', 'created'],
         visible: { selection: true, id: true, content: true, qty: true, amount: true, subtotal: true, due: true, tags: true, created: true },
@@ -133,6 +138,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return notes.find(note => note.id === id);
     }
 
+    function getAllUniqueTags() {
+        const allTags = new Set();
+        notes.forEach(note => {
+            if (note.tags && Array.isArray(note.tags)) {
+                note.tags.forEach(tag => allTags.add(tag));
+            }
+        });
+        return Array.from(allTags);
+    }
+
     function parseNoteContent(content) {
         const parsed = { qty: null, amount: null, currencyCode: null, dueDateISO: null, dueDateFormatted: null };
 
@@ -216,6 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTable();
         renderFooter();
         renderColumnModal();
+        hideTagInput(); // Ensure tag input is hidden on general re-render
         calculateAndRenderTotals(); // New: Calculate and render totals
     }
 
@@ -379,16 +395,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const addTagBtn = document.createElement('span');
         addTagBtn.className = 'add-tag-btn';
         addTagBtn.textContent = '+';
-        addTagBtn.onclick = () => {
-            const newTag = prompt('Add new tag:');
-            if (newTag && newTag.trim() !== '') {
-                const note = findNoteById(noteId);
-                if (!note.tags.includes(newTag.trim())) {
-                    note.tags.push(newTag.trim());
-                    saveState();
-                    renderApp();
-                }
-            }
+        addTagBtn.onclick = (e) => {
+            e.stopPropagation(); // Prevent document click listener from closing the modal immediately
+            showTagInput(noteId, addTagBtn);
         };
         td.appendChild(addTagBtn);
     }
@@ -520,6 +529,10 @@ document.addEventListener('DOMContentLoaded', () => {
             columnModal.style.display = 'none';
             advancedToolsModal.style.display = 'none';
             selectionContextMenu.style.display = 'none';
+            // Hide tag input modal if click is outside
+            if (tagInputModal.style.display === 'block') {
+                hideTagInput();
+            }
         });
 
         columnToggleBtn.addEventListener('click', e => {
@@ -533,6 +546,12 @@ document.addEventListener('DOMContentLoaded', () => {
             advancedToolsModal.style.display = advancedToolsModal.style.display === 'block' ? 'none' : 'block';
         });
         advancedToolsModal.addEventListener('click', e => e.stopPropagation());
+        
+        // Tag Autocomplete Listeners
+        tagInputModal.addEventListener('click', e => e.stopPropagation());
+        tagInputField.addEventListener('input', handleTagInputTyping);
+        tagInputField.addEventListener('keydown', handleTagInputKeyDown);
+        tagSuggestionsList.addEventListener('click', handleTagSuggestionClick);
 
         // --- DRAG & DROP FOR COLUMNS ---
         let draggedTh = null;
@@ -651,10 +670,24 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function autoTag(content) {
         const tags = new Set();
+        // 1. Existing logic for hashtags and capitalized words
         (content.match(/#\w+/g) || []).forEach(tag => tags.add(tag.substring(1)));
         (content.match(/\b[A-Z][a-z]{2,}\b/g) || []).forEach(word => {
             if (!["The", "A", "An"].includes(word)) tags.add(word);
         });
+
+        // 2. New logic: check against all existing tags
+        const allUniqueTags = getAllUniqueTags();
+        allUniqueTags.forEach(existingTag => {
+            // Use a case-insensitive regex to find the tag as a whole word/phrase in the content
+            // Escape special regex characters in the tag itself
+            const escapedTag = existingTag.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+            const regex = new RegExp(`\\b${escapedTag}\\b`, 'i');
+            if (regex.test(content)) {
+                tags.add(existingTag); // Add the original cased tag
+            }
+        });
+
         return Array.from(tags);
     }
 
@@ -676,6 +709,59 @@ document.addEventListener('DOMContentLoaded', () => {
             activeTagFilters.add(tag);
         }
         renderApp();
+    }
+
+    // --- TAG AUTOCOMPLETE FUNCTIONS ---
+    function showTagInput(noteId, targetElement) {
+        if (tagInputModal.style.display === 'block' && currentNoteIdForTagging === noteId) {
+            hideTagInput();
+            return;
+        }
+        currentNoteIdForTagging = noteId;
+        const rect = targetElement.getBoundingClientRect();
+        tagInputModal.style.left = `${rect.left}px`;
+        tagInputModal.style.top = `${rect.bottom + 5}px`;
+        tagInputModal.style.display = 'block';
+        tagInputField.value = '';
+        tagSuggestionsList.innerHTML = '';
+        tagInputField.focus();
+    }
+
+    function hideTagInput() {
+        tagInputModal.style.display = 'none';
+        currentNoteIdForTagging = null;
+    }
+
+    function handleTagInputTyping() {
+        const inputValue = tagInputField.value.toLowerCase();
+        tagSuggestionsList.innerHTML = '';
+        if (!inputValue) return;
+
+        const allTags = getAllUniqueTags();
+        const filteredTags = allTags.filter(tag => tag.toLowerCase().includes(inputValue));
+        
+        filteredTags.slice(0, 10).forEach(tag => { // Limit to 10 suggestions
+            const li = document.createElement('li');
+            li.textContent = tag;
+            tagSuggestionsList.appendChild(li);
+        });
+    }
+
+    function handleTagInputKeyDown(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addTagToNote(currentNoteIdForTagging, tagInputField.value);
+            hideTagInput();
+        } else if (e.key === 'Escape') {
+            hideTagInput();
+        }
+    }
+
+    function handleTagSuggestionClick(e) {
+        if (e.target.tagName === 'LI') {
+            addTagToNote(currentNoteIdForTagging, e.target.textContent);
+            hideTagInput();
+        }
     }
 
     function handleSort(key) {
@@ -768,6 +854,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
+    function addTagToNote(noteId, tagText) {
+        tagText = tagText.trim();
+        if (!tagText || !noteId) return;
+
+        const note = findNoteById(noteId);
+        if (note) {
+            if (!note.tags) note.tags = []; // Defensive coding
+            if (!note.tags.includes(tagText)) {
+                note.tags.push(tagText);
+                saveState();
+                renderApp();
+            }
+        }
+    }
+
     function handleSelectAll(e) {
         selectedNoteIds.clear();
         if (e.target.checked) {
