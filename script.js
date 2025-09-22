@@ -956,26 +956,53 @@ document.addEventListener('DOMContentLoaded', () => {
         URL.revokeObjectURL(a.href);
     }
     
+    function generateExportFilename(extension) {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const datePart = `${year}${month}${day}`;
+
+        const filterParts = [];
+
+        // Add tag filters, sorted alphabetically
+        if (activeTagFilters.size > 0) {
+            filterParts.push(...[...activeTagFilters].sort((a, b) => a.localeCompare(b)));
+        }
+
+        // Add date filter, formatted as DDMMYYYY
+        if (activeDateFilter) {
+            const formattedDate = activeDateFilter.replace(/\//g, '');
+            filterParts.push(formattedDate);
+        }
+
+        if (filterParts.length > 0) {
+            const filterString = filterParts.sort().join('_');
+            return `MyNotes-${datePart}-${filterString}.${extension}`;
+        } else {
+            return `MyNotes-${datePart}.${extension}`;
+        }
+    }
+
     function handleExportJSON() {
-        downloadFile(JSON.stringify(notes, null, 2), 'notes.json', 'application/json');
+        const notesToExport = getNotesToDisplay();
+        const fileName = generateExportFilename('json');
+        downloadFile(JSON.stringify(notesToExport, null, 2), fileName, 'application/json');
     }
     
     function handleExportCSV() {
-        let csvContent = "data:text/csv;charset=utf-8,";
-        csvContent += "ID,Content,Tags,Created,Deleted\n";
-        notes.forEach(note => {
-            const content = `"${note.content.replace(/"/g, '""')}"`;
-            const tags = `"${note.tags.join(';')}"`;
+        const notesToExport = getNotesToDisplay();
+        const fileName = generateExportFilename('csv');
+
+        const csvRows = ["ID,Content,Tags,Created,Deleted"];
+        notesToExport.forEach(note => {
+            const content = `"${(note.content || '').replace(/"/g, '""')}"`;
+            const tags = `"${(note.tags || []).join(';')}"`;
             const row = [note.id, content, tags, note.created, note.deleted].join(",");
-            csvContent += row + "\r\n";
+            csvRows.push(row);
         });
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", "notes.csv");
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const csvContent = csvRows.join("\r\n");
+        downloadFile(csvContent, fileName, 'text/csv;charset=utf-8;');
     }
     
     function handleImportJSON(event) {
