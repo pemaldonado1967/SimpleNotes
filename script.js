@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (key === 'selection') {
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
-                checkbox.addEventListener('change', handleSelectAll);
+                checkbox.addEventListener('click', handleSelectAll);
                 th.appendChild(checkbox);
             } else {
                 th.textContent = columnLabels[key];
@@ -646,6 +646,13 @@ document.addEventListener('DOMContentLoaded', () => {
         importJsonBtn.addEventListener('click', () => importFileInput.click());
         importFileInput.addEventListener('change', handleImportJSON);
         renumberBtn.addEventListener('click', handleRenumber);
+
+        // New listener for Escape key to close context menu
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                selectionContextMenu.style.display = 'none';
+            }
+        });
     }
     
     function createNote() {
@@ -780,7 +787,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const isDateTag = e.target.classList.contains('date-tag');
 
         if (isCurrencyTag) {
-            e.stopPropagation(); // Prevent row selection
             const clickedCurrency = e.target.dataset.currency;
             activeCurrencyFilter = (activeCurrencyFilter === clickedCurrency) ? null : clickedCurrency;
             renderApp();
@@ -788,31 +794,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (isDateTag) {
-            e.stopPropagation(); // Prevent row selection
             const clickedDate = e.target.dataset.date;
             activeDateFilter = (activeDateFilter === clickedDate) ? null : clickedDate;
             renderApp();
             return;
         }
 
-
         const isCheckbox = e.target.type === 'checkbox';
         if (isCheckbox) {
             e.target.checked ? selectedNoteIds.add(noteId) : selectedNoteIds.delete(noteId);
-        } else if (!e.target.isContentEditable && !e.target.closest('.tags-cell')) {
-            if (e.ctrlKey || e.metaKey) {
-                selectedNoteIds.has(noteId) ? selectedNoteIds.delete(noteId) : selectedNoteIds.add(noteId);
+            updateSelectionUI();
+            if (selectedNoteIds.size > 0) {
+                e.stopPropagation(); // Prevent document click listener from closing it
+                showContextMenu(e.clientX, e.clientY);
             } else {
-                selectedNoteIds.clear();
-                selectedNoteIds.add(noteId);
+                selectionContextMenu.style.display = 'none';
             }
-        }
-        updateSelectionUI();
-        if (selectedNoteIds.size > 0 && !e.target.isContentEditable) {
-            e.stopPropagation();
-            showContextMenu(e.clientX, e.clientY);
-        } else {
-            selectionContextMenu.style.display = 'none';
         }
     }
 
@@ -870,11 +867,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleSelectAll(e) {
+        e.stopPropagation(); // Prevent document click listener from closing the menu
         selectedNoteIds.clear();
         if (e.target.checked) {
             getNotesToDisplay().forEach(note => selectedNoteIds.add(note.id));
         }
         updateSelectionUI();
+
+        if (selectedNoteIds.size > 0) {
+            const rect = e.target.getBoundingClientRect();
+            // Position the menu relative to the "select all" checkbox
+            showContextMenu(rect.right, rect.bottom);
+        } else {
+            selectionContextMenu.style.display = 'none';
+        }
     }
 
     function updateSelectionUI() {
@@ -900,7 +906,10 @@ document.addEventListener('DOMContentLoaded', () => {
         deletePermanentlyBtn.style.display = 'flex';
         shareBtn.style.display = isDeleted ? 'none' : 'flex';
 
-        selectionContextMenu.style.left = `${x > window.innerWidth - 200 ? window.innerWidth - 200 : x}px`;
+        const xOffset = 10; // Move 10px to the right
+        const finalX = x + xOffset;
+
+        selectionContextMenu.style.left = `${finalX > window.innerWidth - 200 ? window.innerWidth - 200 : finalX}px`;
         selectionContextMenu.style.top = `${y > window.innerHeight - 150 ? window.innerHeight - 150 : y}px`;
         selectionContextMenu.style.display = 'flex';
     }
