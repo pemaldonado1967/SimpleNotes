@@ -49,8 +49,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeTagFilters = new Set();
     let searchTerm = '';
     let showDeleted = false;
-    let activeCurrencyFilter = null; // New state for currency filter
-    let activeDateFilter = null;     // New state for date filter
     let confirmCallback = null;
     let currentNoteIdForTagging = null;
     let columnConfig = {
@@ -269,12 +267,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // 1. Filter
         const filteredNotes = notes.filter(note => {
             if (!showDeleted && note.deleted) return false;
-            const noteTags = note.tags || []; // Defensively handle notes without a tags property
-            const matchesTag = activeTagFilters.size === 0 ? true : [...activeTagFilters].every(filterTag => noteTags.includes(filterTag));
+
+            // Create a temporary set of all "tags" for the current note for unified filtering
+            const allNoteTags = new Set(note.tags || []);
+            if (note.currencyCode) allNoteTags.add(note.currencyCode);
+            if (note.dueDateFormatted) allNoteTags.add(note.dueDateFormatted);
+
+            const matchesTag = activeTagFilters.size === 0 ? true : [...activeTagFilters].every(filterTag => allNoteTags.has(filterTag));
             const matchesSearch = searchTerm ? (note.content || '').toLowerCase().includes(searchTerm.toLowerCase()) || String(note.id).includes(searchTerm) : true;
-            const matchesCurrency = activeCurrencyFilter ? note.currencyCode === activeCurrencyFilter : true;
-            const matchesDate = activeDateFilter ? note.dueDateFormatted === activeDateFilter : true;
-            return matchesTag && matchesSearch && matchesCurrency && matchesDate;
+            return matchesTag && matchesSearch;
         });
 
         // 2. Sort
@@ -332,7 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 currencySpan.textContent = note.currencyCode;
                                 currencySpan.classList.add('currency-tag');
                                 currencySpan.dataset.currency = note.currencyCode;
-                                if (activeCurrencyFilter === note.currencyCode) currencySpan.classList.add('active');
+                                if (activeTagFilters.has(note.currencyCode)) currencySpan.classList.add('active');
                                 td.appendChild(currencySpan);
                                 td.append(` ${note.amount.toFixed(2)}`);
                             } else {
@@ -359,7 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             dateSpan.textContent = note.dueDateFormatted;
                             dateSpan.classList.add('date-tag');
                             dateSpan.dataset.date = note.dueDateFormatted;
-                            if (activeDateFilter === note.dueDateFormatted) dateSpan.classList.add('active');
+                            if (activeTagFilters.has(note.dueDateFormatted)) dateSpan.classList.add('active');
                             td.appendChild(dateSpan);
                         }
                         break;
@@ -412,6 +413,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const tagCounts = notes.reduce((acc, note) => {
             if (!note.deleted) {
                 (note.tags || []).forEach(tag => { acc[tag] = (acc[tag] || 0) + 1; });
+                // Also count currency and date as filterable tags
+                if (note.currencyCode) {
+                    acc[note.currencyCode] = (acc[note.currencyCode] || 0) + 1;
+                }
+                if (note.dueDateFormatted) {
+                    acc[note.dueDateFormatted] = (acc[note.dueDateFormatted] || 0) + 1;
+                }
             }
             return acc;
         }, {});
@@ -617,6 +625,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         notesTbody.addEventListener('click', handleTableClick);
         notesTbody.addEventListener('focusout', handleTableFocusOut);
+        notesTbody.addEventListener('keydown', handleTableKeyDown);
 
         // --- NEW EVENT LISTENERS ---
         toggleDeletedBtn.addEventListener('click', () => {
@@ -787,16 +796,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const isDateTag = e.target.classList.contains('date-tag');
 
         if (isCurrencyTag) {
-            const clickedCurrency = e.target.dataset.currency;
-            activeCurrencyFilter = (activeCurrencyFilter === clickedCurrency) ? null : clickedCurrency;
-            renderApp();
+            handleTagFilterClick(e.target.dataset.currency);
             return;
         }
 
         if (isDateTag) {
-            const clickedDate = e.target.dataset.date;
-            activeDateFilter = (activeDateFilter === clickedDate) ? null : clickedDate;
-            renderApp();
+            handleTagFilterClick(e.target.dataset.date);
             return;
         }
 
@@ -810,6 +815,14 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 selectionContextMenu.style.display = 'none';
             }
+        }
+    }
+
+    function handleTableKeyDown(e) {
+        // Use Enter key to save changes in an editable cell
+        if (e.key === 'Enter' && e.target.isContentEditable) {
+            e.preventDefault(); // Prevent adding a new line in the cell
+            e.target.blur();    // Trigger the 'focusout' event to save
         }
     }
 
@@ -841,9 +854,11 @@ document.addEventListener('DOMContentLoaded', () => {
             renderApp();
         } else if (key === 'content' && note.content !== newValue) {
             note.content = newValue;
+            // Reparse all derived data and re-run auto-tagging
             Object.assign(note, parseNoteContent(newValue));
-            saveState(); // Save the updated note with new parsed data
-            renderApp(); // Re-render to update table and totals
+            note.tags = autoTag(newValue);
+            saveState();
+            renderApp();
         } else if (note[key] !== newValue) { // Fallback for other potential editable fields
             note[key] = newValue;
             saveState();
@@ -972,21 +987,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const day = String(now.getDate()).padStart(2, '0');
         const datePart = `${year}${month}${day}`;
 
+        const dateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
         const filterParts = [];
 
-        // Add tag filters, sorted alphabetically
+        // Add all active filters, sorting them and formatting dates
         if (activeTagFilters.size > 0) {
-            filterParts.push(...[...activeTagFilters].sort((a, b) => a.localeCompare(b)));
-        }
-
-        // Add date filter, formatted as DDMMYYYY
-        if (activeDateFilter) {
-            const formattedDate = activeDateFilter.replace(/\//g, '');
-            filterParts.push(formattedDate);
+            const sortedFilters = [...activeTagFilters].sort((a, b) => a.localeCompare(b));
+            sortedFilters.forEach(tag => {
+                if (dateRegex.test(tag)) {
+                    filterParts.push(tag.replace(/\//g, '')); // Format date as DDMMYYYY
+                } else {
+                    filterParts.push(tag);
+                }
+            });
         }
 
         if (filterParts.length > 0) {
-            const filterString = filterParts.sort().join('_');
+            const filterString = filterParts.join('_'); // Already sorted
             return `MyNotes-${datePart}-${filterString}.${extension}`;
         } else {
             return `MyNotes-${datePart}.${extension}`;
