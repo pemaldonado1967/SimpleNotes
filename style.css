@@ -177,6 +177,14 @@ body {
 .tag .delete-tag:hover { opacity: 1; }
 .add-tag-btn { cursor: pointer; font-size: 1.2rem; color: var(--secondary-color); }
 
+/* New style for recurrence icon */
+.recurrence-icon {
+    font-family: 'Material Symbols Outlined';
+    font-size: 1rem;
+    color: var(--primary-color);
+    margin-right: 8px;
+}
+
 /* Footer & Tag Filters */
 .app-footer {
     padding: 8px 24px;

@@ -92,6 +92,10 @@ document.addEventListener('DOMContentLoaded', () => {
     populateLanguages();
     renderApp();
     setupEventListeners();
+    // New: Initialize reminders
+    initReminders();
+    processRecurrence();
+    initReminders();
 
     // --- DATA & STATE FUNCTIONS ---
     function loadState() {
@@ -147,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function parseNoteContent(content) {
-        const parsed = { qty: null, amount: null, currencyCode: null, dueDateISO: null, dueDateFormatted: null };
+        const parsed = { qty: null, amount: null, currencyCode: null, dueDateISO: null, dueDateFormatted: null, recurrence: null };
 
         // 1. Parse Quantity: e.g., "Q5"
         const qtyMatch = content.match(/\bQ(\d+)\b/i);
@@ -220,6 +224,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
+
+        // 4. Parse Recurrence Rule (e.g., "every month", "every 2 weeks")
+        // Updated regex to support English (every) and Spanish (cada) keywords and units.
+        const recurrenceMatch = content.match(/\b(every|cada)\s+(?:(\d+)\s+)?(day|week|month|year|d[íi]a|semana|mes|a[ñn]o)s?\b/i);
+        if (recurrenceMatch) {
+            const recurrence = { rule: null, interval: 1 };
+            if (recurrenceMatch[2]) { // The number is now in the second capture group
+                recurrence.interval = parseInt(recurrenceMatch[2], 10);
+            }
+            const unit = recurrenceMatch[3].toLowerCase();
+            
+            if (unit.startsWith('day') || unit.startsWith('d')) recurrence.rule = 'daily';
+            else if (unit.startsWith('week') || unit.startsWith('semana')) recurrence.rule = 'weekly';
+            else if (unit.startsWith('month') || unit.startsWith('mes')) recurrence.rule = 'monthly';
+            else if (unit.startsWith('year') || unit.startsWith('a')) recurrence.rule = 'yearly';
+
+            if (recurrence.rule) {
+                parsed.recurrence = recurrence;
+            }
+        }
+
         return parsed;
     }
 
@@ -374,6 +399,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTagsCell(td, tags, noteId) {
         td.innerHTML = ''; 
         td.classList.add('tags-cell');
+        const note = findNoteById(noteId);
+
+        // Add recurrence icon if applicable
+        if (note && note.recurrence) {
+            const icon = document.createElement('span');
+            icon.className = 'recurrence-icon';
+            icon.textContent = 'repeat';
+            icon.title = `Recurs ${note.recurrence.rule} (every ${note.recurrence.interval})`;
+            td.appendChild(icon);
+        }
+
         (tags || []).forEach(tagText => {
             const tagEl = document.createElement('span');
             tagEl.className = 'tag';
@@ -383,7 +419,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const deleteBtn = document.createElement('span');
             deleteBtn.className = 'delete-tag';
             deleteBtn.textContent = 'x';
-            deleteBtn.onclick = (e) => {
+            deleteBtn.onclick = (e) => { // No need to find note again
                 e.stopPropagation(); // Prevent the tag filter click from firing
                 const note = findNoteById(noteId);
                 note.tags = note.tags.filter(t => t !== tagText);
@@ -664,6 +700,86 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // --- REMINDER FUNCTIONS ---
+    function initReminders() {
+        // 1. Check if Service Worker and Notifications are supported
+        if (!('serviceWorker' in navigator) || !('Notification' in window)) {
+            console.log('Reminders are not supported in this browser.');
+            return;
+        }
+
+        // 2. Request permission from the user
+        Notification.requestPermission().then(permission => {
+            if (permission === 'granted') {
+                console.log('Notification permission granted.');
+                // 3. Set up the daily check
+                scheduleDailyReminderCheck();
+            } else {
+                console.log('Notification permission denied.');
+            }
+        });
+    }
+
+    function scheduleDailyReminderCheck() {
+        const check = () => {
+            const now = new Date();
+            // Check if it's 9 AM (between 9:00:00 and 9:00:59)
+            if (now.getHours() === 9) {
+                console.log('It is 9 AM. Telling Service Worker to check for reminders.');
+                if (navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({ type: 'CHECK_REMINDERS' });
+                }
+            }
+        };
+        // Check immediately on load, and then every minute to see if it's time
+        check(); 
+        setInterval(check, 60 * 1000); // Check every 60 seconds
+    }
+
+    function processRecurrence() {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0); // Normalize 'now' to the start of the day for accurate comparison
+        const notesToAdd = [];
+        let hasChanges = false;
+
+        notes.forEach(note => {
+            // Check if the note is a recurring one and its due date is in the past
+            if (note.recurrence && note.dueDateISO) {
+                let dueDate = new Date(note.dueDateISO);
+                if (dueDate < now) {
+                    let nextDueDate = new Date(dueDate);
+
+                    // Keep advancing the date until it's in the future
+                    while (nextDueDate < now) {
+                        switch (note.recurrence.rule) {
+                            case 'daily': nextDueDate.setDate(nextDueDate.getDate() + note.recurrence.interval); break;
+                            case 'weekly': nextDueDate.setDate(nextDueDate.getDate() + (7 * note.recurrence.interval)); break;
+                            case 'monthly': nextDueDate.setMonth(nextDueDate.getMonth() + note.recurrence.interval); break;
+                            case 'yearly': nextDueDate.setFullYear(nextDueDate.getFullYear() + note.recurrence.interval); break;
+                        }
+                    }
+
+                    // Create a new note based on the old one, but with the new future date
+                    const newNote = { ...note }; // Copy properties
+                    delete newNote.deleted; // New recurring tasks should not be deleted
+                    newNote.id = noteIdCounter++;
+                    // Re-parse content to get the new date properties
+                    const newDateData = parseNoteContent(nextDueDate.toLocaleDateString('en-GB'));
+                    newNote.dueDateISO = newDateData.dueDateISO;
+                    newNote.dueDateFormatted = newDateData.dueDateFormatted;
+                    notesToAdd.push(newNote);
+                    hasChanges = true;
+                }
+            }
+        });
+
+        if (hasChanges) {
+            notes.push(...notesToAdd);
+            saveState();
+            renderApp(); // Re-render if new notes were added
+        }
+    }
+
     function createNote() {
         const content = noteInput.value.trim();
         if (!content) return;
