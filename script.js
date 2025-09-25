@@ -66,6 +66,14 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: 'Français (FR)', code: 'fr-FR' }, { name: 'Deutsch (DE)', code: 'de-DE' },
         { name: 'Italiano (IT)', code: 'it-IT' }, { name: '日本語 (JP)', code: 'ja-JP' }
     ];
+    const placeholderText = `💡 Type a note...
+ • Add a due date like "25/12" or "15/01/2025"
+ • Add an amount like "USD12.50" or a calculation like "=50*1.15"
+ • Make it recur with "every month" or "cada 2 semanas"
+ • Add quantity with "Q3"
+ • Drop a file or use the 🎤 to transcribe.`;
+
+    noteInput.placeholder = placeholderText;
 
     // --- SPEECH RECOGNITION SETUP ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -400,6 +408,35 @@ document.addEventListener('DOMContentLoaded', () => {
         td.innerHTML = ''; 
         td.classList.add('tags-cell');
         const note = findNoteById(noteId);
+
+        // Add reminder bell icon if there's a due date
+        if (note && note.dueDateISO && !note.deleted) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Normalize to start of day
+            const dueDate = new Date(note.dueDateISO);
+            dueDate.setHours(0, 0, 0, 0); // Normalize to start of day
+
+            const diffTime = dueDate.getTime() - today.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            let bellColorClass = '';
+            let bellTitle = `Due in ${diffDays} days`;
+
+            if (diffDays < 2) { // Past, today, or tomorrow
+                bellColorClass = 'bell-red';
+                bellTitle = diffDays < 0 ? `Overdue by ${Math.abs(diffDays)} days` : `Due in ${diffDays} days`;
+            } else if (diffDays <= 5) { // 2 to 5 days
+                bellColorClass = 'bell-orange';
+            } else { // 6 or more days
+                bellColorClass = 'bell-green';
+            }
+
+            const bellIcon = document.createElement('span');
+            bellIcon.className = `reminder-bell ${bellColorClass}`;
+            bellIcon.textContent = 'notifications';
+            bellIcon.title = bellTitle;
+            td.appendChild(bellIcon);
+        }
 
         // Add recurrence icon if applicable
         if (note && note.recurrence) {

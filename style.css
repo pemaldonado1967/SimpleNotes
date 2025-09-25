@@ -188,6 +188,18 @@ body {
     margin-right: 8px;
 }
 
+/* New styles for reminder bell icon */
+.reminder-bell {
+    font-family: 'Material Symbols Outlined';
+    font-size: 1rem;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+.bell-red { color: #dc3545; }
+.bell-orange { color: #fd7e14; }
+.bell-green { color: #28a745; }
+
+
 /* Footer & Tag Filters */
 .app-footer {
     padding: 8px 24px;
