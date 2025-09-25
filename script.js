@@ -802,17 +802,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function autoTag(content) {
         const tags = new Set();
-        // 1. Existing logic for hashtags and capitalized words
-        (content.match(/#\w+/g) || []).forEach(tag => tags.add(tag.substring(1)));
-        (content.match(/\b[A-Z][a-z]{2,}\b/g) || []).forEach(word => {
-            if (!["The", "A", "An"].includes(word)) tags.add(word);
-        });
-
-        // 2. New logic: check against all existing tags
+        // New logic: Only add a tag if a word in the content matches an already existing tag.
         const allUniqueTags = getAllUniqueTags();
         allUniqueTags.forEach(existingTag => {
-            // Use a case-insensitive regex to find the tag as a whole word/phrase in the content
-            // Escape special regex characters in the tag itself
+            // Use a case-insensitive regex to find the tag as a whole word/phrase in the content.
+            // Escape special regex characters in the tag itself to prevent errors.
             const escapedTag = existingTag.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
             const regex = new RegExp(`\\b${escapedTag}\\b`, 'i');
             if (regex.test(content)) {
