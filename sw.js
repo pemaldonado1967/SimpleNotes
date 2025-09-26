@@ -1,12 +1,14 @@
 /**
  * Service Worker for Alpha-Numeric App
  */
-
 const NOTIFICATION_TAG = 'alpha-numeric-reminder';
+const CHECK_INTERVAL = 60 * 60 * 1000; // Check every hour
 
 // Listen for the 'activate' event to take control immediately.
 self.addEventListener('activate', event => {
     console.log('Service Worker activated.');
+    // Start the periodic check as soon as the service worker is active.
+    startPeriodicCheck();
     // This ensures the new service worker takes over all clients immediately.
     event.waitUntil(clients.claim());
 });
@@ -29,6 +31,9 @@ self.addEventListener('notificationclick', event => {
             } else if (action.startsWith('snooze-')) {
                 const minutes = parseInt(action.split('-')[1]);
                 return handleSnooze(noteId, minutes);
+            } else if (action === 'snooze-tomorrow') {
+                // Snooze for 24 hours (1440 minutes)
+                return handleSnooze(noteId, 1440);
             }
         })
     );
@@ -43,11 +48,31 @@ self.addEventListener('message', event => {
 });
 
 /**
- * Checks localStorage for notes due today and shows notifications.
+ * Starts a recurring timer to check for reminders.
+ * This runs independently of the main application tab.
+ */
+function startPeriodicCheck() {
+    console.log('Service Worker starting periodic check.');
+    const check = () => {
+        const now = new Date();
+        // Only run the check between 9:00 AM and 10:00 AM to be efficient.
+        if (now.getHours() === 9) {
+            console.log('It is 9 AM, running reminder check.');
+            checkForReminders();
+        }
+    };
+    // Check immediately on activation and then set an interval.
+    check();
+    setInterval(check, CHECK_INTERVAL);
+}
+
+/**
+ * Checks localStorage for notes due today and shows notifications if it's 9 AM.
  */
 function checkForReminders() {
     const notesJSON = self.localStorage.getItem('notes-app-notes');
     if (!notesJSON) return;
+    console.log('Checking for notes to remind...');
 
     const notes = JSON.parse(notesJSON);
     const today = new Date();
@@ -112,7 +137,9 @@ function showNotification(note) {
         data: { noteId: note.id },
         actions: [
             { action: 'mark-done', title: 'Yes, Done' },
-            { action: 'snooze-15', title: 'Snooze 15m' },
+            { action: 'snooze-15', title: 'Snooze 15 min' },
+            { action: 'snooze-60', title: 'Snooze 1 hr' },
+            { action: 'snooze-tomorrow', title: 'Remind Tomorrow' }
         ]
     };
     self.registration.showNotification('Alpha-Numeric Reminder', options);

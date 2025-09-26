@@ -66,12 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: 'Français (FR)', code: 'fr-FR' }, { name: 'Deutsch (DE)', code: 'de-DE' },
         { name: 'Italiano (IT)', code: 'it-IT' }, { name: '日本語 (JP)', code: 'ja-JP' }
     ];
-    const placeholderText = `💡 Type a note...
- • Add a due date like "25/12" or "15/01/2025"
- • Add an amount like "USD12.50" or a calculation like "=50*1.15"
- • Make it recur with "every month" or "cada 2 semanas"
- • Add quantity with "Q3"
- • Drop a file or use the 🎤 to transcribe.`;
+    const placeholderText = `💡Type or speak your Alpha-Numeric note. 1.Amounts preceded by its currency code "USD100", "ARS2000"; 2.Dates "25/12" (current year), or "25/12/27" (specific); 3.Formulas "=(500+200)/12"; 4.Recurrency with "every ..." or "cada ..."(every month, cada 1 mes); 5.Quantities as "Q##" (Q12); 6.Notifications are automatic daily at 9AM`;
 
     noteInput.placeholder = placeholderText;
 
@@ -103,7 +98,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // New: Initialize reminders
     initReminders();
     processRecurrence();
-    initReminders();
 
     // --- DATA & STATE FUNCTIONS ---
     function loadState() {
@@ -748,29 +742,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2. Request permission from the user
         Notification.requestPermission().then(permission => {
             if (permission === 'granted') {
-                console.log('Notification permission granted.');
-                // 3. Set up the daily check
-                scheduleDailyReminderCheck();
+                console.log('Notification permission granted. Service Worker will handle reminders.');
             } else {
                 console.log('Notification permission denied.');
             }
         });
-    }
-
-    function scheduleDailyReminderCheck() {
-        const check = () => {
-            const now = new Date();
-            // Check if it's 9 AM (between 9:00:00 and 9:00:59)
-            if (now.getHours() === 9) {
-                console.log('It is 9 AM. Telling Service Worker to check for reminders.');
-                if (navigator.serviceWorker.controller) {
-                    navigator.serviceWorker.controller.postMessage({ type: 'CHECK_REMINDERS' });
-                }
-            }
-        };
-        // Check immediately on load, and then every minute to see if it's time
-        check(); 
-        setInterval(check, 60 * 1000); // Check every 60 seconds
     }
 
     function processRecurrence() {
