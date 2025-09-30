@@ -979,7 +979,10 @@ document.addEventListener('DOMContentLoaded', () => {
             note.content = newValue;
             // Reparse all derived data and re-run auto-tagging
             Object.assign(note, parseNoteContent(newValue));
-            note.tags = autoTag(newValue);
+			// Merge existing tags with new auto-generated tags
+            const newTags = autoTag(newValue);
+            note.tags = Array.from(new Set([...(note.tags || []), ...newTags]));
+
             saveState();
             renderApp();
         } else if (note[key] !== newValue) { // Fallback for other potential editable fields
